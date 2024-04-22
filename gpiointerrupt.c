@@ -34,422 +34,230 @@
  *  ======== gpiointerrupt.c ========
  */
 
-// Problem Description:
-//
-// This code implements the Project as specified
-// in the document:
-// Project Thermostat Lab Guide PDF
-// for the SNHU Course CS-350.
-
-// Solution:
-//
-// First I implemented a task scheduler to determine when to run a task
-// Then I created state machine for the different tasks where appropriate
-// and ran them according to the task scheduler
-
-
+/*
+ * Problem Description:
+ *
+ * This code implements the Project as specified
+ * in the document:
+ * Milestone Three Timer Interrupt Lab Guide PDF
+ * for the SNHU Course CS-350.
+ *
+ * Solution:
+ *
+ * I created two states, one for the which message to display and
+ * the other for the light states. Then I created 2 arrays of light states for the
+ * messages, and with a index variable cycled through one each phase of the timer.
+ * I also checked a variable at the end of the array to determine if the interrupt
+ * had switched the message to be displayed.
+ *
+ */
 
 #include <stddef.h>
-#include <stdio.h>
 
 /* Driver Header files */
 #include <ti/drivers/GPIO.h>
 #include <ti/drivers/Timer.h>
-#include <ti/drivers/I2C.h>
-#include <ti/drivers/UART.h>
 
 /* Driver configuration */
 #include "ti_drivers_config.h"
 
-#define DISPLAY(x) UART_write(uart, &output, x);
-#define TRUE 1
-#define FALSE 0
-#define NULL 0
-#define NUMBER_OF_TASKS 3
-#define GLOBAL_PERIOD 100
-#define INTERRUPT_PERIOD 200
-#define TEMP_PERIOD 500
-#define UART_PERIOD 1000
-#define START_TEMP 25
-#define MIN_SETPOINT 0
-#define MAX_SETPOINT 99
-#define INITIAL_TEMP 0
-#define INITIAL_SECONDS 0
+/* macro for finding array size since we need it quite a bit */
+#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 
-// define the states for the state machines and set the initial state
-enum BUTTON_STATES {NONE, BUTTON_0, BUTTON_1} BUTTON_STATE = NONE;
+/* states for what message should be displayed now
+ * and if an interrupt was hit what it should
+ * change to  */
+enum MESSAGES_STATES {SOS_MESSAGE, OK_MESSAGE} TIMER_MESSAGE, INTERRUPT_MESSAGE;
+
+/* the different states for the dot (red light),
+ * dash (green light), and off (no lights) */
+enum LIGHT_STATES {DOT_STATE, DASH_STATE, OFF_STATE } LIGHT_STATE;
+
+/* I tried a fancier way of building increasing size arrays
+ * for s, o, and k but couldn't get it to work. The following arrays
+ * are just all the building blocks from LIGHT_STATES */
+enum LIGHT_STATES sos[] = {
+    /* S  built with dot and off (red on for 500ms and off for 500ms
+     * last line off for 500ms * 3 for character break*/
+    DOT_STATE, OFF_STATE,
+    DOT_STATE, OFF_STATE,
+    DOT_STATE, OFF_STATE, OFF_STATE, OFF_STATE,
+    /* O  built with dash and off (green on for 500ms * 3 and off for 500ms
+     * last line off for 500ms * 3 for character break*/
+    DASH_STATE, DASH_STATE, DASH_STATE, OFF_STATE,
+    DASH_STATE, DASH_STATE, DASH_STATE, OFF_STATE,
+    DASH_STATE, DASH_STATE, DASH_STATE, OFF_STATE, OFF_STATE, OFF_STATE,
+    /* S built with dot and off (red on for 500ms and off for 500ms
+     * last line off for 500ms * 7 for word break*/
+    DOT_STATE, OFF_STATE,
+    DOT_STATE, OFF_STATE,
+    DOT_STATE, OFF_STATE, OFF_STATE, OFF_STATE, OFF_STATE, OFF_STATE, OFF_STATE, OFF_STATE
+};
+
+enum LIGHT_STATES ok[] = {
+    /* O  built with dash and off (green on for 500ms * 3 and off for 500ms
+     * last line off for 500ms * 3 for character break*/
+    DASH_STATE, DASH_STATE, DASH_STATE, OFF_STATE,
+    DASH_STATE, DASH_STATE, DASH_STATE, OFF_STATE,
+    DASH_STATE, DASH_STATE, DASH_STATE, OFF_STATE, OFF_STATE, OFF_STATE,
+    /* K built with dot, dash, and off (dash on for 500ms * 3 or dot on for 500ms followed by off for 500ms
+     * last line off for 500ms * 7 for word break*/
+    DASH_STATE, DASH_STATE, DASH_STATE, OFF_STATE,
+    DOT_STATE, OFF_STATE,
+    DASH_STATE, DASH_STATE, DASH_STATE, OFF_STATE, OFF_STATE, OFF_STATE, OFF_STATE, OFF_STATE, OFF_STATE, OFF_STATE
+};
+
+/* position in the message array (position of current state)*/
+unsigned int messageArrayPosition = 0;
+
 /*
- * since enum sets HEAT_OFF to 0 and HEAT_ON to 1 I can use HEAT_STATE
- * directly in the output to the UART
+ *  ======== setLights ========
+ *  Function to turn lights on and off according to state
+ *
+ *  Function turns red on and ensures green is off if state is DOT_STATE
+ *  Function turns green on and ensures red is off if state is DASH_STATE
+ *  Function turns both lights off is state is OFF_STATE
+ *  does not have any parameters and does not return anything
  */
-enum HEAT_STATES {HEAT_OFF, HEAT_ON} HEAT_STATE = HEAT_OFF;
-
-
-// UART Global Variables
-char output[64];
-int bytesToSend;
-
-// I2C Global Variables
-static const struct {
-    uint8_t address;
-    uint8_t resultReg;
-    char *id;
-} sensors[3] = {
-    { 0x48, 0x0000, "11X" },
-    { 0x49, 0x0000, "116" },
-    { 0x41, 0x0001, "006" }
-};
-uint8_t txBuffer[1];
-uint8_t rxBuffer[2];
-I2C_Transaction i2cTransaction;
-
-// Driver Handles - Global variables
-I2C_Handle i2c;
-UART_Handle uart;
-Timer_Handle timer0;
-
-// global variables
-int temperature = INITIAL_TEMP;
-int setPoint = START_TEMP;
-int seconds = INITIAL_SECONDS;
-
-volatile unsigned char ready_tasks = FALSE;
-int global_period = GLOBAL_PERIOD;
-
-// forward declarations
-void changeTempSetPoint();
-void updateTemp();
-void oneSecondTasks();
-int16_t readTemp(void);
-
-// global variables for the task manager
-struct task_entry {
-    void (*f)();
-    int elapsed_time;
-    int period;
-    char triggered;
-};
-
-struct task_entry tasks[NUMBER_OF_TASKS] = {
-    {&changeTempSetPoint, INTERRUPT_PERIOD, INTERRUPT_PERIOD, FALSE},
-    {&updateTemp, TEMP_PERIOD, TEMP_PERIOD, FALSE},
-    {&oneSecondTasks, UART_PERIOD, UART_PERIOD, FALSE}
-};
-
-/**
- * Function for state machine for changing the setPoint variable
- *
- * The function increments or decrements the setPoint variable
- * depending on the state of BUTTON_STATE. BUTTON_0 indicates the interrupt
- * was tripped for the increment button and BUTTON_1 is for decrement.
- * There is also a condition for both to keep the number in the range of
- * MIN_setPoint and MAX_setPoint
- * Takes no arguments and does not return anything
- *
-**/
-void changeTempSetPoint() {
-    // Actions
-    switch (BUTTON_STATE) {
-        case NONE:
-            break;
-        case BUTTON_0:
-            if (setPoint < MAX_SETPOINT) {
-                setPoint++;
-            }
-            break;
-        case BUTTON_1:
-            if (setPoint > MIN_SETPOINT) {
-                setPoint--;
-            }
-            break;
-        default:
-            break;
-    }
-    // Transitions
-    switch (BUTTON_STATE) {
-        case NONE:
-            break;
-        case BUTTON_0:
-            BUTTON_STATE = NONE;
-            break;
-        case BUTTON_1:
-            BUTTON_STATE = NONE;
-            break;
-        default:
-            break;
-    }
-}
-
-/**
- * Function for updating the temperature variable
- *
- * Function uses the readTemp() function provided
- * Does not take any arguments and does not return anything
- *
-**/
-void updateTemp() {
-    temperature = readTemp();
-}
-
-/**
- * Function for updating the seconds variable
- *
- * Function increments second. Used to enhance readability.
- * Does not take any arguments and does not return anything
- *
-**/
-void incrementSeconds() {
-    seconds++;
-}
-
-/**
- * Function for sending to UART
- *
- * Function sends string of 64 chars to UART. Used to enhance readability.
- * Does not take any arguments and does not return anything
- *
-**/
-void sendToUART() {
-    DISPLAY(snprintf(output, 64, "<%02d,%02d,%d,%04d>\n\r", temperature, setPoint, HEAT_STATE, seconds))
-}
-
-/**
- * Function for setting heat on or off depending on the setPoint and current temperature
- *
- * Uses a state machine to update HEAT_STATE. If the temperature is less than
- * the setPoint the HEAT_STATE is set to HEAT_ON and the red light is turned on.
- * If the temperature is greater than or equal to setPoint the HEAT_STATE is set to
- * HEAT_OFF and the red light is turned off.
- * Does not take any arguments and does not return anything
- *
-**/
-void setHeat() {
-    // Transitions
-    switch (HEAT_STATE) {
-        case HEAT_OFF:
-            if (temperature < setPoint) {
-                HEAT_STATE = HEAT_ON;
-            }
-            break;
-        case HEAT_ON:
-            if (temperature >= setPoint) {
-                HEAT_STATE = HEAT_OFF;
-            }
-            break;
-        default:
-            break;
-    }
-    // Actions
-    switch (HEAT_STATE) {
-        case HEAT_OFF:
-            // light off
-            GPIO_write(CONFIG_GPIO_LED_0, CONFIG_GPIO_LED_OFF);
-            break;
-        case HEAT_ON:
-            // light on
+void setLights() {
+    switch(LIGHT_STATE) {
+        case DOT_STATE:   // DOT (red on)
             GPIO_write(CONFIG_GPIO_LED_0, CONFIG_GPIO_LED_ON);
+            GPIO_write(CONFIG_GPIO_LED_1, CONFIG_GPIO_LED_OFF);
+            break;
+        case DASH_STATE: // DASH (green on)
+            GPIO_write(CONFIG_GPIO_LED_0, CONFIG_GPIO_LED_OFF);
+            GPIO_write(CONFIG_GPIO_LED_1, CONFIG_GPIO_LED_ON);
+            break;
+        case OFF_STATE:   // OFF
+            GPIO_write(CONFIG_GPIO_LED_0, CONFIG_GPIO_LED_OFF);
+            GPIO_write(CONFIG_GPIO_LED_1, CONFIG_GPIO_LED_OFF);
             break;
         default:
             break;
-    }
-}
-
-/**
- * Function for the tasks that need to be done at 1 second
- *
- * I put the logic into separate functions to make the code easier to read.
- * Does not take any arguments and does not return anything
- *
-**/
-void oneSecondTasks() {
-    setHeat();
-    sendToUART();
-    incrementSeconds();
-}
-
-// Make sure you call initUART() before calling this function.
-void initI2C(void) {
-    int8_t i, found;
-    I2C_Params i2cParams;
-
-    DISPLAY(snprintf(output, 64, "Initializing I2C Driver - "))
-
-    // Init the driver
-    I2C_init();
-
-    // Configure the driver
-    I2C_Params_init(&i2cParams);
-    i2cParams.bitRate = I2C_400kHz;
-
-    // Open the driver
-    i2c = I2C_open(CONFIG_I2C_0, &i2cParams);
-    if (i2c == NULL) {
-        DISPLAY(snprintf(output, 64, "Failed\n\r"))
-        while (1);
-    }
-    DISPLAY(snprintf(output, 32, "Passed\n\r"))
-    // Boards were shipped with different sensors.
-    // Welcome to the world of embedded systems.
-    // Try to determine which sensor we have.
-    // Scan through the possible sensor addresses
-    /* Common I2C transaction setup */
-    i2cTransaction.writeBuf = txBuffer;
-    i2cTransaction.writeCount = 1;
-    i2cTransaction.readBuf = rxBuffer;
-    i2cTransaction.readCount = 0;
-    found = false;
-    for (i=0; i<3; ++i) {
-        i2cTransaction.slaveAddress = sensors[i].address;
-        txBuffer[0] = sensors[i].resultReg;
-        DISPLAY(snprintf(output, 64, "Is this %s? ", sensors[i].id))
-        if (I2C_transfer(i2c, &i2cTransaction)) {
-            DISPLAY(snprintf(output, 64, "Found\n\r"))
-            found = true;
-            break;
-        }
-        DISPLAY(snprintf(output, 64, "No\n\r"))
-    }
-    if(found) {
-        DISPLAY(snprintf(output, 64, "Detected TMP%s I2C address: %x\n\r", sensors[i].id, i2cTransaction.slaveAddress))
-    } else {
-        DISPLAY(snprintf(output, 64, "Temperature sensor not found, contact professor\n\r"))
-    }
-}
-
-int16_t readTemp(void) {
-    int16_t temperature = 0;
-    i2cTransaction.readCount = 2;
-    if (I2C_transfer(i2c, &i2cTransaction)) {
-        /*
-         * Extract degrees C from the received data;
-         * see TMP sensor datasheet
-         */
-        temperature = (rxBuffer[0] << 8) | (rxBuffer[1]);
-        temperature *= 0.0078125;
-        /*
-         * If the MSB is set '1', then we have a 2's complement
-         * negative value which needs to be sign extended
-         */
-        if (rxBuffer[0] & 0x80) {
-            temperature |= 0xF000;
-        }
-    } else {
-        DISPLAY(snprintf(output, 64, "Error reading temperature sensor(%d)\n\r",i2cTransaction.status))
-        DISPLAY(snprintf(output, 64, "Please power cycle your board by unplugging USB and plugging back in.\n\r"))
-    }
-    return temperature;
-}
-
-void initUART(void) {
-    UART_Params uartParams;
-    // Init the driver
-    UART_init();
-    // Configure the driver
-    UART_Params_init(&uartParams);
-    uartParams.writeDataMode = UART_DATA_BINARY;
-    uartParams.readDataMode = UART_DATA_BINARY;
-    uartParams.readReturnMode = UART_RETURN_FULL;
-    uartParams.baudRate = 115200;
-    // Open the driver
-    uart = UART_open(CONFIG_UART_0, &uartParams);
-    if (uart == NULL) {
-        /* UART_open() failed */
-        while (1);
     }
 }
 
 /*
  *  ======== timerCallback ========
- *  Callback function for the timer interrupt. Occurs every 100ms.
- *
- *  This is the code from the video for the task manager.
- *  Every time the timer expires it loops through the array of tasks and
- *  checks if the elapsed time is greater than or equal to the total period
- *  time for the task. If it is the flag for the task is raised and the elapsed
- *  time is reset. If not the elapsed time is incremented by the global period (100ms).
+ *  Callback function for the timer interrupt.
  */
-void timerCallback(Timer_Handle myHandle, int_fast16_t status) {
-    int x = 0;
-    for (x = 0; x < NUMBER_OF_TASKS; x++) {
-        if (tasks[x].elapsed_time >= tasks[x].period) {
-            tasks[x].triggered = TRUE;
-            ready_tasks = TRUE;
-            tasks[x].elapsed_time = 0;
-        } else {
-            tasks[x].elapsed_time += global_period;
-        }
+void timerCallback(Timer_Handle myHandle, int_fast16_t status)
+{
+    /* Transition
+     * changes the timer LIGHT_STATE to the state in the array
+     * for the message at index messageArrayPosition
+    */
+    switch(TIMER_MESSAGE) {
+        case SOS_MESSAGE:
+            LIGHT_STATE = sos[messageArrayPosition];
+            break;
+        case OK_MESSAGE:
+            LIGHT_STATE = ok[messageArrayPosition];
+            break;
+        default:
+            break;
+    }
+    /* Actions
+     * changes the lights to the current state, increments the position
+     * of the index, and checks if the index is past the end of the array.
+     * If it is sets the state to the interrupt's state and resets the index.
+     */
+    switch(TIMER_MESSAGE) {
+        case SOS_MESSAGE:
+            setLights();
+            messageArrayPosition++;
+            if(messageArrayPosition == ARRAY_SIZE(sos)) {
+                TIMER_MESSAGE = INTERRUPT_MESSAGE;
+                messageArrayPosition = 0;
+            }
+            break;
+        case OK_MESSAGE:
+            setLights();
+            messageArrayPosition++;
+            if(messageArrayPosition == ARRAY_SIZE(ok)) {
+                TIMER_MESSAGE = INTERRUPT_MESSAGE;
+                messageArrayPosition = 0;
+            }
+            break;
+        default:
+            break;
     }
 }
-
-
-
 
 /*
  *  ======== timerInit ========
  *  Initialization function for the timer interrupt on timer0.
  */
-void initTimer(void) {
+void initTimer(void)
+{
+    Timer_Handle timer0;
     Timer_Params params;
-    // Init the driver
+
     Timer_init();
-    // Configure the driver
     Timer_Params_init(&params);
-    params.period = 100000;  // 100ms
+    params.period = 500000;             // set timer for 500ms
     params.periodUnits = Timer_PERIOD_US;
     params.timerMode = Timer_CONTINUOUS_CALLBACK;
     params.timerCallback = timerCallback;
-    // Open the driver
+
     timer0 = Timer_open(CONFIG_TIMER_0, &params);
-    if (timer0 == NULL) {
+
+    if(timer0 == NULL) {
         /* Failed to initialized timer */
         while (1) {}
     }
-    if (Timer_start(timer0) == Timer_STATUS_ERROR) {
+
+    if(Timer_start(timer0) == Timer_STATUS_ERROR)
+    {
         /* Failed to start timer */
         while (1) {}
     }
 }
 
-
 /*
- *  This is the callback for interrupt button 0
- *
- *  If the button is pressed it sets BUTTON_STATE to BUTTON_0 so
- *  the next period will register a change in the state and increase
- *  the setPoint
+ *  ======== gpioButtonCallback ========
+ *  Callback function for the GPIO interrupt for either CONFIG_GPIO_BUTTON_0 or CONFIG_GPIO_BUTTON_1.
  */
-void gpioButton0Increase(uint_least8_t index)
+void gpioButtonCallback(uint_least8_t index)
 {
-    BUTTON_STATE = BUTTON_0;
+    /* if interrupt button is pressed, change to the other message */
+    switch(INTERRUPT_MESSAGE) {
+        case SOS_MESSAGE:
+            INTERRUPT_MESSAGE = OK_MESSAGE;
+            break;
+        case OK_MESSAGE:
+            INTERRUPT_MESSAGE = SOS_MESSAGE;
+            break;
+        default:
+            break;
+    }
 }
 
 /*
- *  This is the callback for interrupt button 1
- *
- *  If the button is pressed it sets BUTTON_STATE to BUTTON_1 so
- *  the next period will register a change in the state and decrease
- *  the setPoint
+ *  ======== mainThread ========
  */
-void gpioButton1Decrease(uint_least8_t index)
+void *mainThread(void *arg0)
 {
-    BUTTON_STATE = BUTTON_1;
-}
-
-/*
- * put the logic for initializing the GPIO into a separate function
- */
-void initGPIO(void) {
+    /* Call driver init functions for GPIO and timer */
     GPIO_init();
+    initTimer();
 
     /* Configure the LED and button pins */
     GPIO_setConfig(CONFIG_GPIO_LED_0, GPIO_CFG_OUT_STD | GPIO_CFG_OUT_LOW);
+    GPIO_setConfig(CONFIG_GPIO_LED_1, GPIO_CFG_OUT_STD | GPIO_CFG_OUT_LOW);
     GPIO_setConfig(CONFIG_GPIO_BUTTON_0, GPIO_CFG_IN_PU | GPIO_CFG_IN_INT_FALLING);
 
     /* Start with LEDs off */
     GPIO_write(CONFIG_GPIO_LED_0, CONFIG_GPIO_LED_OFF);
+    GPIO_write(CONFIG_GPIO_LED_1, CONFIG_GPIO_LED_OFF);
+
+    /* Set initial states to SOS_MESSAGE */
+    INTERRUPT_MESSAGE = SOS_MESSAGE;
+    TIMER_MESSAGE = SOS_MESSAGE;
 
     /* Install Button callback */
-    GPIO_setCallback(CONFIG_GPIO_BUTTON_0, gpioButton0Increase);
+    GPIO_setCallback(CONFIG_GPIO_BUTTON_0, gpioButtonCallback);
 
     /* Enable interrupts */
     GPIO_enableInt(CONFIG_GPIO_BUTTON_0);
@@ -463,36 +271,8 @@ void initGPIO(void) {
         GPIO_setConfig(CONFIG_GPIO_BUTTON_1, GPIO_CFG_IN_PU | GPIO_CFG_IN_INT_FALLING);
 
         /* Install Button callback */
-        GPIO_setCallback(CONFIG_GPIO_BUTTON_1, gpioButton1Decrease);
+        GPIO_setCallback(CONFIG_GPIO_BUTTON_1, gpioButtonCallback);
         GPIO_enableInt(CONFIG_GPIO_BUTTON_1);
-    }
-}
-
-/*
- *  ======== mainThread ========
- */
-void *mainThread(void *arg0)
-{
-    /* Call driver init functions for GPIO, UART, I2C, and timer */
-    initGPIO();
-    initUART();
-    initI2C();
-    initTimer();
-
-    /* This is from the video for the task manager. It runs the timer callback until
-     * a task is ready. Then it loops over all the tasks and if the task is triggered
-     * it runs the associated function and resets the flag.
-     */
-    while (TRUE) {
-        int x = 0;
-        while (!ready_tasks) {}
-        ready_tasks = FALSE;
-        for (x = 0; x < NUMBER_OF_TASKS; x++) {
-            if (tasks[x].triggered) {
-                tasks[x].f();
-                tasks[x].triggered = FALSE;
-            }
-        }
     }
 
     return (NULL);
