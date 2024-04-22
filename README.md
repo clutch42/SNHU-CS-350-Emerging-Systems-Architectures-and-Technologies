@@ -1,11 +1,43 @@
-Summarize the project and what problem it was solving. This milestone was to create a state machine that would turn a light on when on is typed and off when off is typed using the UART
+Example Summary
+Example that uses the UART driver to echo back to the console.
 
-What did you do particularly well? I thing I handled testing to ensure that the program worked with edge cases such as oon and ofon.
+Peripherals & Pin Assignments
+When this project is built, the SysConfig tool will generate the TI-Driver configurations into the ti_drivers_config.c and ti_drivers_config.h files. Information on pins and resources used is present in both generated files. Additionally, the System Configuration file (*.syscfg) present in the project may be opened with SysConfig's graphical user interface to determine pins and resources used.
 
-Where could you improve? I could have broken down the code into reusable functions especially in the initialization in main for the UART.
+CONFIG_GPIO_LED_0 - Indicates the UART driver was initialized within main()
+CONFIG_UART_0 - Used to echo characters from host serial session
+BoosterPacks, Board Resources & Jumper Settings
+For board specific jumper settings, resources and BoosterPack modifications, refer to the Board.html file.
 
-What tools and/or resources are you adding to your support network? Learning how to work with UART is both a valuable skill to know, and was really fun and cool to see a direct link between what you type and how the light reacts.
+If you're using an IDE such as Code Composer Studio (CCS) or IAR, please refer to Board.html in your project directory for resources used and board-specific jumper settings.
 
-What skills from this project will be particularly transferable to other projects and/or course work? The skills from this milestone were directly transferable to the main project, as we needed to use the UART to communicate the temperature, setpoints, whether the heater is on or off, and elapsed seconds.
+The Board.html can also be found in your SDK installation:
 
-How did you make this project maintainable, readable, and adaptable? I tried to use descriptive names for the variables and enums, and use all of the 10 guidelines for best practices in coding.
+    <SDK_INSTALL_DIR>/source/ti/boards/<BOARD>
+Example Usage
+Open a serial session (e.g. PuTTY, etc.) to the appropriate COM port.
+The COM port can be determined via Device Manager in Windows or via ls /dev/tty* in Linux.
+The connection should have the following settings
+
+    Baud-rate:  115200
+    Data bits:       8
+    Stop bits:       1
+    Parity:       None
+    Flow Control: None
+Run the example. CONFIG_GPIO_LED_0 turns ON to indicate driver initialization is complete.
+
+The target echoes back any character that is typed in the serial session.
+
+If the serial session is started before the target completes initialization, the following is displayed: Echoing characters:
+
+Application Design Details
+This example shows how to initialize the UART driver in blocking read and write mode with no data processing and echo characters back to a console.
+
+A single thread, mainThread, reads a character from CONFIG_UART_0 and writes it back.
+
+TI-RTOS:
+
+When building in Code Composer Studio, the kernel configuration project will be imported along with the example. The kernel configuration project is referenced by the example, so it will be built first. The "release" kernel configuration is the default project used. It has many debug features disabled. These feature include assert checking, logging and runtime stack checks. For a detailed difference between the "release" and "debug" kernel configurations and how to switch between them, please refer to the SimpleLink MCU SDK User's Guide. The "release" and "debug" kernel configuration projects can be found under <SDK_INSTALL_DIR>/kernel/tirtos/builds/<BOARD>/(release|debug)/(ccs|gcc).
+FreeRTOS:
+
+Please view the FreeRTOSConfig.h header file for example configuration information.
