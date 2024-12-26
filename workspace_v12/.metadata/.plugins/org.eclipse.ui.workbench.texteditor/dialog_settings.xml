@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<section name="Workbench">
+	<section name="org.eclipse.ui.texteditor.FindReplaceDialog">
+		<item key="wrap" value="true"/>
+		<item key="casesensitive" value="false"/>
+		<item key="wholeword" value="false"/>
+		<item key="incremental" value="false"/>
+		<item key="isRegEx" value="false"/>
+		<item key="selection" value="setPoint"/>
+		<list key="findhistory">
+			<item value="setpoint"/>
+			<item value="setMorseLEDs"/>
+			<item value="messageCounter"/>
+			<item value="okMessage"/>
+			<item value="sosMessage"/>
+			<item value="BUTTON_STATE"/>
+			<item value="CURRENT_MESSAGE"/>
+			<item value="MESSAGES_STATE"/>
+			<item value="M"/>
+			<item value="CURRENT_MESSAGES"/>
+			<item value="Light_Off"/>
+			<item value="Light_On"/>
+			<item value="Light_Input_2"/>
+			<item value="Light_Input_1"/>
+			<item value="Light_Input_0"/>
+		</list>
+		<list key="replacehistory">
+			<item value="setPoint"/>
+			<item value="setLights"/>
+			<item value="messageArrayPosition"/>
+			<item value="ok"/>
+			<item value="sos"/>
+			<item value="INTERRUPT_MESSAGE"/>
+			<item value="TIMER_MESSAGE"/>
+			<item value="MESSAGES_STATES"/>
+			<item value="MESSAGES_STATE"/>
+			<item value="LIGHT_OFF"/>
+			<item value="LIGHT_ON"/>
+			<item value="LIGHT_INPUT_CHAR_3"/>
+			<item value="LIGHT_INPUT_CHAR_2"/>
+			<item value="LIGHT_INPUT_CHAR_1"/>
+			<item value="LIGHT_STATE"/>
+		</list>
+	</section>
+	<section name="org.eclipse.ui.texteditor.FindReplaceDialog_dialogBounds">
+		<item key="DIALOG_X_ORIGIN" value="897"/>
+		<item key="DIALOG_Y_ORIGIN" value="364"/>
+		<item key="DIALOG_WIDTH" value="322"/>
+		<item key="DIALOG_HEIGHT" value="391"/>
+		<item key="DIALOG_FONT_NAME" value="1|Segoe UI|9.0|0|WINDOWS|1|-12|0|0|0|400|0|0|0|1|0|0|0|0|Segoe UI"/>
+	</section>
+</section>

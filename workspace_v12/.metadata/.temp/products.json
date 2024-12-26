@@ -1,0 +1,10 @@
+[
+  {
+    "name": "simplelink_cc32xx_sdk",
+    "displayName": "SimpleLink CC32XX SDK",
+    "version": "4.30.00.06",
+    "path": "C:\\ti\\simplelink_cc32xx_sdk_4_30_00_06\\.metadata\\product.json",
+    "includesCCXXImageComponents": true,
+    "documentationPath": "../docs"
+  }
+]

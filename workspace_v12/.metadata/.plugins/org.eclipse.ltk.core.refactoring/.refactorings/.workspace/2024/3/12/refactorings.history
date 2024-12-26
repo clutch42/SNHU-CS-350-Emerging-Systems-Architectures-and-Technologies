@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<session version="1.0">
+<refactoring comment="Delete resource &apos;uart2echo_CC3220S_LAUNCHXL_nortos_ccs&apos;" deleteContents="false" description="Delete resource &apos;uart2echo_CC3220S_LAUNCHXL_nortos_ccs&apos;" element1="/uart2echo_CC3220S_LAUNCHXL_nortos_ccs" flags="7" id="org.eclipse.ltk.core.refactoring.delete.resources" resources="1" stamp="1710865449709"/>
+</session>
